@@ -45,8 +45,8 @@ LEVELS = ["Easy", "Medium", "Hard"]
 # Conversation states for submit
 SUBMIT_SELECT_CHALLENGE, SUBMIT_WAIT_FLAG = range(2)
 
-# Conversation states for addflag (simplified version matching current flow)
-AF_NAME, AF_POINTS, AF_LINK, AF_FLAG = range(4)
+# Conversation states for addflag
+AF_CATEGORY, AF_NAME, AF_POINTS, AF_LINK, AF_LEVEL, AF_FLAG = range(6)
 
 # Pagination settings
 ITEMS_PER_PAGE = 10
@@ -132,27 +132,36 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/cancel – If any error got just try this and retry that command you got error\n"
     )
 
-# View challenges → details
+# View challenges → categories -> challenges -> details
 async def view_challenges(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    rows = [c["_id"] for c in flags.find()]
-    if not rows:
-        await update.message.reply_text("No challenges available.")
+    keyboard = [[InlineKeyboardButton(cat, callback_data=f"viewcat:{cat}")] for cat in CATEGORIES]
+    await update.message.reply_text("📂 Select a category:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def view_category_challenges(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    category = query.data.split(":", 1)[1]
+    challenges = [c["_id"] for c in flags.find({"category": category})]
+    if not challenges:
+        await query.edit_message_text(f"No challenges in category {category}.")
         return
-    keyboard = [[InlineKeyboardButton(ch, callback_data=f"detail:{ch}")] for ch in rows]
-    await update.message.reply_text(
-        "📋 Select a challenge:", reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    keyboard = [[InlineKeyboardButton(ch, callback_data=f"detail:{ch}")] for ch in challenges]
+    await query.edit_message_text(f"📋 Challenges in {category}:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def details_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     name = query.data.split(":", 1)[1]
     doc = flags.find_one({"_id": name})
+    if not doc:
+        await query.edit_message_text("❗ Challenge not found.")
+        return
+    category = doc.get("category", "Unknown")
     pts = doc.get("points", 0)
+    level = doc.get("level", "Unknown")
     link = doc.get("post_link", "")
-    await query.edit_message_text(
-        f"*{name}*\nPoints: {pts}\n[Post Link]({link})", parse_mode="Markdown"
-    )
+    text = f"*{name}*\nCategory: {category}\nPoints: {pts}\nLevel: {level}\n[Post Link]({link})"
+    await query.edit_message_text(text, parse_mode="Markdown")
 
 # Submission flow
 async def submit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -287,7 +296,7 @@ async def viewusers_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = build_menu(items, page, 'users')
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
 
-# Admin commands (addnewadmins, addflag, delete, viewsubmissions)
+# Admin  Admin commands (addnewadmins, addflag, delete, viewsubmissions)
 async def addnewadmins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not is_admin(user.username):
@@ -305,7 +314,16 @@ async def addflag_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(user.username):
         await update.message.reply_text("❗ Unauthorized.")
         return ConversationHandler.END
-    await update.message.reply_text("📝 Enter challenge name:")
+    keyboard = [[InlineKeyboardButton(cat, callback_data=f"category:{cat}")] for cat in CATEGORIES]
+    await update.message.reply_text("📂 Select a category:", reply_markup=InlineKeyboardMarkup(keyboard))
+    return AF_CATEGORY
+
+async def select_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    category = query.data.split(":", 1)[1]
+    context.user_data["af_category"] = category
+    await query.edit_message_text(f"📝 Enter challenge name for category {category}:")
     return AF_NAME
 
 async def af_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -324,20 +342,37 @@ async def af_points(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def af_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["af_link"] = update.message.text.strip()
-    await update.message.reply_text("🚩 Enter the correct flag string:")
+    keyboard = [[InlineKeyboardButton(lvl, callback_data=f"level:{lvl}")] for lvl in LEVELS]
+    await update.message.reply_text("📊 Select difficulty level:", reply_markup=InlineKeyboardMarkup(keyboard))
+    return AF_LEVEL
+
+async def select_level(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    level = query.data.split(":", 1)[1]
+    context.user_data["af_level"] = level
+    await query.edit_message_text(f"🚩 Enter the correct flag string for {context.user_data['af_name']}:")
     return AF_FLAG
 
 async def af_flag(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = context.user_data["af_name"]
     pts = context.user_data["af_points"]
     link = context.user_data["af_link"]
+    category = context.user_data["af_category"]
+    level = context.user_data["af_level"]
     flag_str = update.message.text.strip()
     flags.update_one(
         {"_id": name},
-        {"$set": {"flag": flag_str, "points": pts, "post_link": link}},
+        {"$set": {
+            "flag": flag_str,
+            "points": pts,
+            "post_link": link,
+            "category": category,
+            "level": level
+        }},
         upsert=True,
     )
-    await update.message.reply_text(f"✅ Challenge '{name}' added/updated with {pts} points.")
+    await update.message.reply_text(f"✅ Challenge '{name}' in category '{category}' with level '{level}' added/updated with {pts} points.")
     return ConversationHandler.END
 
 async def delete_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -453,6 +488,8 @@ def main():
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("myviewpoints", my_viewpoints))
     app.add_handler(CommandHandler("viewchallenges", view_challenges))
+    app.add_handler(CallbackQueryHandler(view_category_challenges, pattern=r"^viewcat:.+"))
+    app.add_handler(CallbackQueryHandler(details_challenge, pattern=r"^detail:.+"))
     app.add_handler(CommandHandler("leaderboard", leaderboard_start))
     app.add_handler(CallbackQueryHandler(leaderboard_page, pattern=r"^lead:\d+$"))
     app.add_handler(CommandHandler("addnewadmins", addnewadmins))
@@ -461,7 +498,6 @@ def main():
     app.add_handler(CallbackQueryHandler(viewusers_page, pattern=r"^users:\d+:(nav|.+)"))
     app.add_handler(CommandHandler("viewsubmissions", viewsubmissions))
     app.add_handler(CallbackQueryHandler(submissions_page, pattern=r"^subs:\d+$"))
-    app.add_handler(CallbackQueryHandler(details_challenge, pattern=r"^detail:.+"))
 
     # Conversations
     submit_conv = ConversationHandler(
@@ -476,9 +512,11 @@ def main():
     addflag_conv = ConversationHandler(
         entry_points=[CommandHandler("addflag", addflag_start)],
         states={
+            AF_CATEGORY: [CallbackQueryHandler(select_category, pattern=r"^category:.+")],
             AF_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, af_name)],
             AF_POINTS: [MessageHandler(filters.TEXT & ~filters.COMMAND, af_points)],
             AF_LINK: [MessageHandler(filters.TEXT & ~filters.COMMAND, af_link)],
+            AF_LEVEL: [CallbackQueryHandler(select_level, pattern=r"^level:.+")],
             AF_FLAG: [MessageHandler(filters.TEXT & ~filters.COMMAND, af_flag)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
