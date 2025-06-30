@@ -479,7 +479,7 @@ async def submissions_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     items = []
     for r in all_submissions:
         ts = r.get("timestamp", r["_id"].generation_time).strftime("%Y-%m-%d %H:%M:%S")
-        user_doc = users.find_one({"({"_id": r["user_id"]})
+        user_doc = users.find_one({"_id": r["user_id"]})
         uname = user_doc.get("username", "Unknown") if user_doc else "Unknown"
         status = "Correct" if r["correct"] else "Wrong"
         items.append(f"{ts} - @{escape_markdown(uname)} - {r['challenge']} - {r['submitted_flag']} - {status}")
