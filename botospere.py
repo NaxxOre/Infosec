@@ -216,7 +216,7 @@ async def receive_flag(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "correct": correct,
         "timestamp": datetime.utcnow(),
     })
-    if     if correct:
+    if correct:
         users.update_one({"_id": user.id}, {"$inc": {"points": pts}})
         await update.message.reply_text(
             f"✅ Correct! You earned {pts} points for {chal}!"
@@ -240,37 +240,22 @@ async def my_viewpoints(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pts = doc.get("points", 0)
     await update.message.reply_text(f"👤 @{user.username}, you have {pts} points.")
 
-# Optimized Leaderboard with MongoDB aggregation
+# Leaderboard with pagination
 async def leaderboard_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    pipeline = [
-        {
-            "$lookup": {
-                "from": "submissions",
-                "localField": "_id",
-                "foreignField": "user_id",
-                "as": "user_submissions",
-                "pipeline": [
-                    {"$match": {"correct": True}},
-                    {"$sort": {"timestamp": 1}},
-                    {"$limit": 1}
-                ]
-            }
-        },
-        {
-            "$addFields": {
-                "first_scored_at": {
-                    "$ifNull": [{"$arrayElemAt": ["$user_submissions.timestamp", 0]}, datetime.max]
-                }
-            }
-        },
-        {"$sort": {"points": -1, "first_scored_at": 1}},
-        {"$project": {"username": 1, "points": 1, "_id": 0}}
-    ]
-    all_users = list(users.aggregate(pipeline))
+    all_users = list(users.find())
+    # Calculate first_scored_at for each user based on their earliest correct submission
+    for u in all_users:
+        earliest_submission = submissions.find_one(
+            {"user_id": u["_id"], "correct": True},
+            sort=[("timestamp", 1)]
+        )
+        u["first_scored_at"] = earliest_submission["timestamp"] if earliest_submission else datetime.max
+    # Sort by points descending and first_scored_at ascending
+    all_users.sort(key=lambda u: (-u["points"], u["first_scored_at"]))
     if not all_users:
         await update.message.reply_text("No users on the leaderboard yet.")
         return
-    items = [f"{rank + 1}. @{escape_markdown(u.get('username', 'Unknown'))} — {u['points']} pts" for rank, uuckoo in enumerate(all_users)]
+    items = [f"{rank + 1}. @{escape_markdown(u.get('username', 'Unknown'))} — {u['points']} pts" for rank, u in enumerate(all_users)]
     context.user_data['leaderboard_items'] = items
     await send_leaderboard_page(update.message, context, 0)
 
@@ -524,9 +509,6 @@ def init_commands(app):
     return on_startup
 
 def main():
-    # Diagnostic check for submit_start
-    print("Checking if submit_start is defined:", "submit_start" in globals())
-    
     app = (
         ApplicationBuilder()
         .token(TOKEN)
