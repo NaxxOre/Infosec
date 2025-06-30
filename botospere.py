@@ -80,6 +80,8 @@ async def get_unsolved_challenges(user_id: int) -> list[str]:
 # Escape special Markdown characters
 def escape_markdown(text: str) -> str:
     """Escape special Markdown characters to prevent parsing errors."""
+    if text is None:
+        return "Unknown"
     characters = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
     for char in characters:
         text = text.replace(char, f'\\{char}')
@@ -244,12 +246,15 @@ async def leaderboard_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not all_users:
         await update.message.reply_text("No users on the leaderboard yet.")
         return
-    items = [f"{rank+1}. @{escape_markdown(u['username'])} — {u['points']} pts" for rank, u in enumerate(all_users)]
+    items = [f"{rank + 1}. @{escape_markdown(u.get('username', 'Unknown'))} — {u['points']} pts" for rank, u in enumerate(all_users)]
     context.user_data['leaderboard_items'] = items
     await send_leaderboard_page(update.message, context, 0)
 
 async def send_leaderboard_page(message, context, page):
-    items = context.user_data['leaderboard_items']
+    items = context.user_data.get('leaderboard_items', [])
+    if not items:
+        await message.reply_text("Leaderboard data is missing or expired.")
+        return
     start = page * ITEMS_PER_PAGE
     end = start + ITEMS_PER_PAGE
     page_items = items[start:end]
@@ -290,7 +295,7 @@ async def viewusers_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     all_users = list(users.find())
     context.user_data['users_list'] = all_users
-    items = [f"{u['_id']}: {u['username']}" for u in all_users]
+    items = [f"{u['_id']}: @{escape_markdown(u.get('username', 'Unknown'))}" for u in all_users]
     keyboard = build_menu(items, 0, 'users')
     await update.message.reply_text("👥 Registered Users:", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -300,7 +305,7 @@ async def viewusers_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     _, page_str, _ = query.data.split(':', 2)
     page = int(page_str)
     all_users = context.user_data.get('users_list', [])
-    items = [f"{u['_id']}: {u['username']}" for u in all_users]
+    items = [f"{u['_id']}: @{escape_markdown(u.get('username', 'Unknown'))}" for u in all_users]
     keyboard = build_menu(items, page, 'users')
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -408,29 +413,33 @@ async def viewsubmissions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(user.username):
         await update.message.reply_text("❗ Unauthorized.")
         return
-    all_submissions = list(submissions.find().sort("timestamp", -1))
+    page = 0
+    all_submissions = list(submissions.find().sort("timestamp", -1).skip(page * ITEMS_PER_PAGE).limit(ITEMS_PER_PAGE))
     if not all_submissions:
         await update.message.reply_text("No submissions yet.")
         return
     items = []
     for r in all_submissions:
         ts = r.get("timestamp", r["_id"].generation_time).strftime("%Y-%m-%d %H:%M:%S")
-        uname = users.find_one({"_id": r["user_id"]})["username"]
+        user_doc = users.find_one({"_id": r["user_id"]})
+        uname = user_doc.get("username", "Unknown") if user_doc else "Unknown"
         status = "Correct" if r["correct"] else "Wrong"
         items.append(f"{ts} - @{escape_markdown(uname)} - {r['challenge']} - {r['submitted_flag']} - {status}")
     context.user_data['submissions_items'] = items
-    await send_submissions_page(update.message, context, 0)
+    context.user_data['submissions_page'] = page
+    await send_submissions_page(update.message, context, page)
 
 async def send_submissions_page(message, context, page):
-    items = context.user_data['submissions_items']
-    start = page * ITEMS_PER_PAGE
-    end = start + ITEMS_PER_PAGE
-    page_items = items[start:end]
-    text = "📝 Submissions:\n\n" + "\n".join(page_items)
+    items = context.user_data.get('submissions_items', [])
+    if not items:
+        await message.reply_text("Submissions data is missing or expired.")
+        return
+    text = "📝 Submissions:\n\n" + "\n".join(items)
     keyboard = []
     if page > 0:
         keyboard.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"subs:{page-1}"))
-    if end < len(items):
+    total_submissions = submissions.count_documents({})
+    if (page + 1) * ITEMS_PER_PAGE < total_submissions:
         keyboard.append(InlineKeyboardButton("Next ➡️", callback_data=f"subs:{page+1}"))
     reply_markup = InlineKeyboardMarkup([keyboard]) if keyboard else None
     await message.reply_text(text, reply_markup=reply_markup)
@@ -439,18 +448,25 @@ async def submissions_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     page = int(query.data.split(':')[1])
-    items = context.user_data.get('submissions_items', [])
-    if not items:
-        await query.edit_message_text("Submissions list is empty or expired.")
+    all_submissions = list(submissions.find().sort("timestamp", -1).skip(page * ITEMS_PER_PAGE).limit(ITEMS_PER_PAGE))
+    if not all_submissions:
+        await query.edit_message_text("No submissions on this page.")
         return
-    start = page * ITEMS_PER_PAGE
-    end = start + ITEMS_PER_PAGE
-    page_items = items[start:end]
-    text = "📝 Submissions:\n\n" + "\n".join(page_items)
+    items = []
+    for r in all_submissions:
+        ts = r.get("timestamp", r["_id"].generation_time).strftime("%Y-%m-%d %H:%M:%S")
+        user_doc = users.find_one({"_id": r["user_id"]})
+        uname = user_doc.get("username", "Unknown") if user_doc else "Unknown"
+        status = "Correct" if r["correct"] else "Wrong"
+        items.append(f"{ts} - @{escape_markdown(uname)} - {r['challenge']} - {r['submitted_flag']} - {status}")
+    context.user_data['submissions_items'] = items
+    context.user_data['submissions_page'] = page
+    text = "📝 Submissions:\n\n" + "\n".join(items)
     keyboard = []
     if page > 0:
         keyboard.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"subs:{page-1}"))
-    if end < len(items):
+    total_submissions = submissions.count_documents({})
+    if (page + 1) * ITEMS_PER_PAGE < total_submissions:
         keyboard.append(InlineKeyboardButton("Next ➡️", callback_data=f"subs:{page+1}"))
     reply_markup = InlineKeyboardMarkup([keyboard]) if keyboard else None
     await query.edit_message_text(text, reply_markup=reply_markup)
