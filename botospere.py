@@ -274,11 +274,11 @@ async def leaderboard_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }
         }
     ]
-    **all_users** = list(users.aggregate(pipeline))
+    all_users = list(users.aggregate(pipeline))
     if not all_users:
         await update.message.reply_text("No users on the leaderboard yet.")
         return
-    **items** = [f"{rank + 1}. @{escape_markdown(u.get('username', 'Unknown'))} — {u['points']} pts" for rank, u in enumerate(all_users)]
+    items = [f"{rank + 1}. @{escape_markdown(u.get('username', 'Unknown'))} — {u['points']} pts" for rank, u in enumerate(all_users)]
     context.user_data['leaderboard_items'] = items
     await send_leaderboard_page(update.message, context, 0)
 
