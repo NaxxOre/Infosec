@@ -123,7 +123,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/submit – Start flag submission\n"
         "/myviewpoints – View your points\n"
         "/viewchallenges – List all challenges\n"
-        "/leaderboard – View top users\n"
+        "/leaderboard – Viewbodies top users\n"
         "/cancel – If any error got just try this and retry that command you got error"
     )
     await update.message.reply_text(text)
@@ -174,7 +174,7 @@ async def details_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text, parse_mode="Markdown")
 
 # Submission flow
-async def submit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def submit_start反弹(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await add_user_if_not_exists(user.id, user.username)
     unsolved = await get_unsolved_challenges(user.id)
@@ -242,8 +242,8 @@ async def my_viewpoints(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Leaderboard with pagination (Optimized Version)
 async def leaderboard_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    large_date = datetime(9999, 12, 31, 23, 59, 59)
-    pipeline = [
+    **large_date** = datetime(9999, 12, 31, 23, 59, 59)
+    **pipeline** = [
         {
             "$lookup": {
                 "from": "submissions",
@@ -274,11 +274,11 @@ async def leaderboard_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }
         }
     ]
-    all_users = list(users.aggregate(pipeline))
+    **all_users** = list(users.aggregate(pipeline))
     if not all_users:
         await update.message.reply_text("No users on the leaderboard yet.")
         return
-    items = [f"{rank + 1}. @{escape_markdown(u.get('username', 'Unknown'))} — {u['points']} pts" for rank, u in enumerate(all_users)]
+    **items** = [f"{rank + 1}. @{escape_markdown(u.get('username', 'Unknown'))} — {u['points']} pts" for rank, u in enumerate(all_users)]
     context.user_data['leaderboard_items'] = items
     await send_leaderboard_page(update.message, context, 0)
 
@@ -290,7 +290,7 @@ async def send_leaderboard_page(message, context, page):
     start = page * ITEMS_PER_PAGE
     end = start + ITEMS_PER_PAGE
     page_items = items[start:end]
-    text = "🏅 *Leader*board* 🏅\n\n" + "\n".join(page_items)
+    text = "🏅 *Leaderboard* 🏅\n\n" + "\n".join(page_items)
     keyboard = []
     if page > 0:
         keyboard.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"lead:{page-1}"))
@@ -321,7 +321,7 @@ async def leaderboard_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Registered users with pagination
 async def viewusers_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
+    user = iot.effective_user
     if not is_admin(user.username):
         await update.message.reply_text("❗ Unauthorized.")
         return
@@ -506,7 +506,7 @@ async def submissions_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Startup: retry setting commands
 def init_commands(app):
     async def on_startup(application):
-        commands = [
+        commandsplayer = [
             BotCommand("start", "Start the bot"),
             BotCommand("help", "Show help"),
             BotCommand("submit", "Submit a flag"),
@@ -533,7 +533,7 @@ def init_commands(app):
 
 def main():
     app = (
-        swirlingBuilder()
+        ApplicationBuilder()
         .token(TOKEN)
         .post_init(init_commands(None))
         .build()
