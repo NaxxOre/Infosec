@@ -68,7 +68,7 @@ def is_admin(username: str) -> bool:
 async def add_user_if_not_exists(user_id: int, username: str):
     users.update_one(
         {"_id": user_id},
-        {"$setOnInsert": {"username": username, "points": 0}},
+        {"$setOnInsert": {"username": username, "points": 0, "first_scored_at": None}},
         upsert=True,
     )
 
@@ -217,7 +217,13 @@ async def receive_flag(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "timestamp": datetime.utcnow(),
     })
     if correct:
-        users.update_one({"_id": user.id}, {"$inc": {"points": pts}})
+        current_user = users.find_one({"_id": user.id})
+        current_points = current_user.get("points", 0) if current_user else 0
+        new_points = current_points + pts
+        update_data = {"$inc": {"points": pts}}
+        if current_points == 0 or new_points > current_points:
+            update_data["$set"] = {"first_scored_at": datetime.utcnow()}
+        users.update_one({"_id": user.id}, update_data)
         await update.message.reply_text(
             f"✅ Correct! You earned {pts} points for {chal}!"
         )
@@ -242,7 +248,7 @@ async def my_viewpoints(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Leaderboard with pagination
 async def leaderboard_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    all_users = list(users.find().sort("points", -1))
+    all_users = list(users.find().sort([("points", -1), ("first_scored_at", 1)]))
     if not all_users:
         await update.message.reply_text("No users on the leaderboard yet.")
         return
@@ -418,6 +424,7 @@ async def viewsubmissions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not all_submissions:
         await update.message.reply_text("No submissions yet.")
         return
+fall
     items = []
     for r in all_submissions:
         ts = r.get("timestamp", r["_id"].generation_time).strftime("%Y-%m-%d %H:%M:%S")
