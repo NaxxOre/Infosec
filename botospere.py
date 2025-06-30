@@ -45,8 +45,8 @@ LEVELS = ["Easy", "Medium", "Hard"]
 # Conversation states for submit
 SUBMIT_SELECT_CHALLENGE, SUBMIT_WAIT_FLAG = range(2)
 
-# Conversation states for addflag
-ADDFLAG_CATEGORY, ADDFLAG_NAME, ADDFLAG_POINTS, ADDFLAG_LINK, ADDFLAG_LEVEL, ADDFLAG_FLAG = range(6)
+# Conversation states for addflag (simplified version matching current flow)
+AF_NAME, AF_POINTS, AF_LINK, AF_FLAG = range(4)
 
 # Pagination settings
 ITEMS_PER_PAGE = 10
@@ -132,7 +132,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/cancel – If any error got just try this and retry that command you got error\n"
     )
 
-
 # View challenges → details
 async def view_challenges(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = [c["_id"] for c in flags.find()]
@@ -168,7 +167,7 @@ async def submit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📋 Select a challenge to submit:",
         reply_markup=InlineKeyboardMarkup(keyboard),
     )
-    return SELECT_CHALLENGE
+    return SUBMIT_SELECT_CHALLENGE
 
 async def select_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -179,7 +178,7 @@ async def select_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🚩 Submit flag for *{chal}*:\n_Please send only the flag._",
         parse_mode="Markdown",
     )
-    return WAIT_FLAG
+    return SUBMIT_WAIT_FLAG
 
 async def receive_flag(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -455,21 +454,21 @@ def main():
     app.add_handler(CommandHandler("myviewpoints", my_viewpoints))
     app.add_handler(CommandHandler("viewchallenges", view_challenges))
     app.add_handler(CommandHandler("leaderboard", leaderboard_start))
-    app.add_handler(CallbackQueryHandler(leaderboard_page, pattern=r"^lead:\\d+$"))
+    app.add_handler(CallbackQueryHandler(leaderboard_page, pattern=r"^lead:\d+$"))
     app.add_handler(CommandHandler("addnewadmins", addnewadmins))
     app.add_handler(CommandHandler("delete", delete_challenge))
     app.add_handler(CommandHandler("viewusers", viewusers_start))
-    app.add_handler(CallbackQueryHandler(viewusers_page, pattern=r"^users:\\d+:(nav|.+)"))
+    app.add_handler(CallbackQueryHandler(viewusers_page, pattern=r"^users:\d+:(nav|.+)"))
     app.add_handler(CommandHandler("viewsubmissions", viewsubmissions))
-    app.add_handler(CallbackQueryHandler(submissions_page, pattern=r"^subs:\\d+$"))
+    app.add_handler(CallbackQueryHandler(submissions_page, pattern=r"^subs:\d+$"))
     app.add_handler(CallbackQueryHandler(details_challenge, pattern=r"^detail:.+"))
 
     # Conversations
     submit_conv = ConversationHandler(
         entry_points=[CommandHandler("submit", submit_start)],
         states={
-            SELECT_CHALLENGE: [CallbackQueryHandler(select_challenge, pattern=r"^submit:.+")],
-            WAIT_FLAG: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_flag)],
+            SUBMIT_SELECT_CHALLENGE: [CallbackQueryHandler(select_challenge, pattern=r"^submit:.+")],
+            SUBMIT_WAIT_FLAG: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_flag)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         per_user=True,
