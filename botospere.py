@@ -240,18 +240,41 @@ async def my_viewpoints(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pts = doc.get("points", 0)
     await update.message.reply_text(f"👤 @{user.username}, you have {pts} points.")
 
-# Leaderboard with pagination
+# Leaderboard with pagination (Optimized Version)
 async def leaderboard_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    all_users = list(users.find())
-    # Calculate first_scored_at for each user based on their earliest correct submission
-    for u in all_users:
-        earliest_submission = submissions.find_one(
-            {"user_id": u["_id"], "correct": True},
-            sort=[("timestamp", 1)]
-        )
-        u["first_scored_at"] = earliest_submission["timestamp"] if earliest_submission else datetime.max
-    # Sort by points descending and first_scored_at ascending
-    all_users.sort(key=lambda u: (-u["points"], u["first_scored_at"]))
+    large_date = datetime(9999, 12, 31, 23, 59, 59)
+    pipeline = [
+        {
+            "$lookup": {
+                "from": "submissions",
+                "let": {"user_id": "$_id"},
+                "pipeline": [
+                    {"$match": {"$expr": {"$and": [{"$eq": ["$user_id", "$$user_id"]}, {"$eq": ["$correct", True]}]}}},
+                    {"$sort": {"timestamp": 1}},
+                    {"$limit": 1},
+                    {"$project": {"timestamp": 1}}
+                ],
+                "as": "first_submission"
+            }
+        },
+        {
+            "$addFields": {
+                "first_scored_at": {
+                    "$ifNull": [{"$arrayElemAt": ["$first_submission.timestamp", 0]}, large_date]
+                }
+            }
+        },
+        {
+            "$sort": {"points": -1, "first_scored_at": 1}
+        },
+        {
+            "$project": {
+                "username": 1,
+                "points": 1
+            }
+        }
+    ]
+    all_users = list(users.aggregate(pipeline))
     if not all_users:
         await update.message.reply_text("No users on the leaderboard yet.")
         return
@@ -267,7 +290,7 @@ async def send_leaderboard_page(message, context, page):
     start = page * ITEMS_PER_PAGE
     end = start + ITEMS_PER_PAGE
     page_items = items[start:end]
-    text = "🏅 *Leaderboard* 🏅\n\n" + "\n".join(page_items)
+    text = "🏅 *Leader*board* 🏅\n\n" + "\n".join(page_items)
     keyboard = []
     if page > 0:
         keyboard.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"lead:{page-1}"))
@@ -495,7 +518,7 @@ def init_commands(app):
             BotCommand("delete", "Delete a challenge"),
             BotCommand("viewusers", "View registered users"),
             BotCommand("viewsubmissions", "View submissions log"),
-            BotCommand("cancel", "Cancel current operation"),
+            BotCommand("pcmancel", "Cancel current operation"),
         ]
         for attempt in range(3):
             try:
@@ -510,7 +533,7 @@ def init_commands(app):
 
 def main():
     app = (
-        ApplicationBuilder()
+        swirlingBuilder()
         .token(TOKEN)
         .post_init(init_commands(None))
         .build()
