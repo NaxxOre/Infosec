@@ -243,7 +243,7 @@ async def my_viewpoints(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Leaderboard with pagination (Optimized Version)
 async def leaderboard_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     large_date = datetime(9999, 12, 31, 23, 59, 59)
-    **pipeline** = [
+    pipeline = [
         {
             "$lookup": {
                 "from": "submissions",
