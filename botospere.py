@@ -68,7 +68,7 @@ def is_admin(username: str) -> bool:
 async def add_user_if_not_exists(user_id: int, username: str):
     users.update_one(
         {"_id": user_id},
-        {"$setOnInsert": {"username": username, "points": 0, "last_solved_at": None}},
+        {"$setOnInsert": {"username": username, "points": 0}},
         upsert=True,
     )
 
@@ -217,13 +217,7 @@ async def receive_flag(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "timestamp": datetime.utcnow(),
     })
     if correct:
-        current_user = users.find_one({"_id": user.id})
-        current_points = current_user.get("points", 0) if current_user else 0
-        new_points = current_points + pts
-        update_data = {"$inc": {"points": pts}, "$set": {"last_solved_at": datetime.utcnow()}}
-        if current_points == 0:
-            update_data["$set"]["last_solved_at"] = datetime.utcnow()
-        users.update_one({"_id": user.id}, update_data)
+        users.update_one({"_id": user.id}, {"$inc": {"points": pts}})
         await update.message.reply_text(
             f"✅ Correct! You earned {pts} points for {chal}!"
         )
@@ -248,7 +242,16 @@ async def my_viewpoints(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Leaderboard with pagination
 async def leaderboard_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    all_users = list(users.find().sort([("points", -1), ("last_solved_at", 1)]))
+    all_users = list(users.find())
+    # Calculate first_scored_at for each user based on their earliest correct submission
+    for u in all_users:
+        earliest_submission = submissions.find_one(
+            {"user_id": u["_id"], "correct": True},
+            sort=[("timestamp", 1)]
+        )
+        u["first_scored_at"] = earliest_submission["timestamp"] if earliest_submission else datetime.max
+    # Sort by points descending and first_scored_at ascending
+    all_users.sort(key=lambda u: (-u["points"], u["first_scored_at"]))
     if not all_users:
         await update.message.reply_text("No users on the leaderboard yet.")
         return
@@ -525,7 +528,7 @@ def main():
     app.add_handler(CommandHandler("addnewadmins", addnewadmins))
     app.add_handler(CommandHandler("delete", delete_challenge))
     app.add_handler(CommandHandler("viewusers", viewusers_start))
-    app.add_handler(CallbackQuery = CallbackQueryHandler(viewusers_page, pattern=r"^users:\d+:(nav|.+)"))
+    app.add_handler(CallbackQueryHandler(viewusers_page, pattern=r"^users:\d+:(nav|.+)"))
     app.add_handler(CommandHandler("viewsubmissions", viewsubmissions))
     app.add_handler(CallbackQueryHandler(submissions_page, pattern=r"^subs:\d+$"))
 
