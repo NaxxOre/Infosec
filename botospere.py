@@ -123,7 +123,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/submit – Start flag submission\n"
         "/myviewpoints – View your points\n"
         "/viewchallenges – List all challenges\n"
-        "/leaderboard – Viewbodies top users\n"
+        "/leaderboard – View top users\n"
         "/cancel – If any error got just try this and retry that command you got error"
     )
     await update.message.reply_text(text)
@@ -174,7 +174,7 @@ async def details_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text, parse_mode="Markdown")
 
 # Submission flow
-async def submit_start反弹(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def submit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await add_user_if_not_exists(user.id, user.username)
     unsolved = await get_unsolved_challenges(user.id)
@@ -216,7 +216,7 @@ async def receive_flag(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "correct": correct,
         "timestamp": datetime.utcnow(),
     })
-    if correct:
+    if     if correct:
         users.update_one({"_id": user.id}, {"$inc": {"points": pts}})
         await update.message.reply_text(
             f"✅ Correct! You earned {pts} points for {chal}!"
@@ -240,45 +240,37 @@ async def my_viewpoints(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pts = doc.get("points", 0)
     await update.message.reply_text(f"👤 @{user.username}, you have {pts} points.")
 
-# Leaderboard with pagination (Optimized Version)
+# Optimized Leaderboard with MongoDB aggregation
 async def leaderboard_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    large_date = datetime(9999, 12, 31, 23, 59, 59)
     pipeline = [
         {
             "$lookup": {
                 "from": "submissions",
-                "let": {"user_id": "$_id"},
+                "localField": "_id",
+                "foreignField": "user_id",
+                "as": "user_submissions",
                 "pipeline": [
-                    {"$match": {"$expr": {"$and": [{"$eq": ["$user_id", "$$user_id"]}, {"$eq": ["$correct", True]}]}}},
+                    {"$match": {"correct": True}},
                     {"$sort": {"timestamp": 1}},
-                    {"$limit": 1},
-                    {"$project": {"timestamp": 1}}
-                ],
-                "as": "first_submission"
+                    {"$limit": 1}
+                ]
             }
         },
         {
             "$addFields": {
                 "first_scored_at": {
-                    "$ifNull": [{"$arrayElemAt": ["$first_submission.timestamp", 0]}, large_date]
+                    "$ifNull": [{"$arrayElemAt": ["$user_submissions.timestamp", 0]}, datetime.max]
                 }
             }
         },
-        {
-            "$sort": {"points": -1, "first_scored_at": 1}
-        },
-        {
-            "$project": {
-                "username": 1,
-                "points": 1
-            }
-        }
+        {"$sort": {"points": -1, "first_scored_at": 1}},
+        {"$project": {"username": 1, "points": 1, "_id": 0}}
     ]
     all_users = list(users.aggregate(pipeline))
     if not all_users:
         await update.message.reply_text("No users on the leaderboard yet.")
         return
-    items = [f"{rank + 1}. @{escape_markdown(u.get('username', 'Unknown'))} — {u['points']} pts" for rank, u in enumerate(all_users)]
+    items = [f"{rank + 1}. @{escape_markdown(u.get('username', 'Unknown'))} — {u['points']} pts" for rank, uuckoo in enumerate(all_users)]
     context.user_data['leaderboard_items'] = items
     await send_leaderboard_page(update.message, context, 0)
 
@@ -321,7 +313,7 @@ async def leaderboard_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Registered users with pagination
 async def viewusers_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = iot.effective_user
+    user = update.effective_user
     if not is_admin(user.username):
         await update.message.reply_text("❗ Unauthorized.")
         return
@@ -487,7 +479,7 @@ async def submissions_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     items = []
     for r in all_submissions:
         ts = r.get("timestamp", r["_id"].generation_time).strftime("%Y-%m-%d %H:%M:%S")
-        user_doc = users.find_one({"_id": r["user_id"]})
+        user_doc = users.find_one({"({"_id": r["user_id"]})
         uname = user_doc.get("username", "Unknown") if user_doc else "Unknown"
         status = "Correct" if r["correct"] else "Wrong"
         items.append(f"{ts} - @{escape_markdown(uname)} - {r['challenge']} - {r['submitted_flag']} - {status}")
@@ -506,7 +498,7 @@ async def submissions_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Startup: retry setting commands
 def init_commands(app):
     async def on_startup(application):
-        commandsplayer = [
+        commands = [
             BotCommand("start", "Start the bot"),
             BotCommand("help", "Show help"),
             BotCommand("submit", "Submit a flag"),
@@ -518,7 +510,7 @@ def init_commands(app):
             BotCommand("delete", "Delete a challenge"),
             BotCommand("viewusers", "View registered users"),
             BotCommand("viewsubmissions", "View submissions log"),
-            BotCommand("pcmancel", "Cancel current operation"),
+            BotCommand("cancel", "Cancel current operation"),
         ]
         for attempt in range(3):
             try:
@@ -532,6 +524,9 @@ def init_commands(app):
     return on_startup
 
 def main():
+    # Diagnostic check for submit_start
+    print("Checking if submit_start is defined:", "submit_start" in globals())
+    
     app = (
         ApplicationBuilder()
         .token(TOKEN)
