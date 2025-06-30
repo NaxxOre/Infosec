@@ -77,6 +77,14 @@ async def get_unsolved_challenges(user_id: int) -> list[str]:
     solved = [s["challenge"] for s in submissions.find({"user_id": user_id, "correct": True})]
     return [ch for ch in all_chals if ch not in solved]
 
+# Escape special Markdown characters
+def escape_markdown(text: str) -> str:
+    """Escape special Markdown characters to prevent parsing errors."""
+    characters = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+    for char in characters:
+        text = text.replace(char, f'\\{char}')
+    return text
+
 # Build paginated keyboard
 def build_menu(items, page, prefix):
     start = page * ITEMS_PER_PAGE
@@ -236,7 +244,7 @@ async def leaderboard_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not all_users:
         await update.message.reply_text("No users on the leaderboard yet.")
         return
-    items = [f"{rank+1}. @{u['username']} — {u['points']} pts" for rank, u in enumerate(all_users)]
+    items = [f"{rank+1}. @{escape_markdown(u['username'])} — {u['points']} pts" for rank, u in enumerate(all_users)]
     context.user_data['leaderboard_items'] = items
     await send_leaderboard_page(update.message, context, 0)
 
@@ -296,7 +304,7 @@ async def viewusers_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = build_menu(items, page, 'users')
     await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
 
-# Admin  Admin commands (addnewadmins, addflag, delete, viewsubmissions)
+# Admin commands (addnewadmins, addflag, delete, viewsubmissions)
 async def addnewadmins(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if not is_admin(user.username):
@@ -409,7 +417,7 @@ async def viewsubmissions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ts = r.get("timestamp", r["_id"].generation_time).strftime("%Y-%m-%d %H:%M:%S")
         uname = users.find_one({"_id": r["user_id"]})["username"]
         status = "Correct" if r["correct"] else "Wrong"
-        items.append(f"{ts} - @{uname} - {r['challenge']} - {r['submitted_flag']} - {status}")
+        items.append(f"{ts} - @{escape_markdown(uname)} - {r['challenge']} - {r['submitted_flag']} - {status}")
     context.user_data['submissions_items'] = items
     await send_submissions_page(update.message, context, 0)
 
