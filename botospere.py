@@ -65,7 +65,8 @@ def is_admin(username: str) -> bool:
     return username == ADMIN_USERNAME or bool(admins.find_one({"username": username}))
 
 async def add_user_if_not_exists(user_id: int, username: str):
-    # Update username every time, set points only on insert
+    if username is None:
+        username = "Unknown"
     users.update_one(
         {"_id": user_id},
         {"$set": {"username": username}, "$setOnInsert": {"points": 0}},
@@ -84,7 +85,6 @@ def build_menu(items, page, prefix, items_per_page=ITEMS_PER_PAGE):
     page_items = items[start:end]
     keyboard = []
     for item in page_items:
-        # Use a dummy callback for items to prevent unintended navigation
         keyboard.append([InlineKeyboardButton(item, callback_data=f"{prefix}:noop")])
     nav_buttons = []
     if page > 0:
@@ -261,7 +261,6 @@ async def my_viewpoints(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     doc = users.find_one({"_id": user.id}) or {}
     pts = doc.get("points", 0)
-    # Handle case where username is None
     if user.username:
         name = f"@{user.username}"
     else:
@@ -270,15 +269,13 @@ async def my_viewpoints(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Leaderboard with pagination
 async def leaderboard_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Sort by points descending, then by last_correct_submission ascending
     all_users = list(users.find().sort([("points", -1), ("last_correct_submission", 1)]))
     if not all_users:
         await update.message.reply_text("No users on the leaderboard yet.")
         return
     context.user_data['leaderboard_list'] = all_users
     logger.info(f"Stored leaderboard_list with {len(all_users)} users in user_data")
-    # Use get() to handle missing or None usernames
-    items = [f"{rank+1}. @{html.escape(u.get('username', 'Unknown'))} — {u['points']} pts" for rank, u in enumerate(all_users)]
+    items = [f"{rank+1}. @{html.escape(u.get('username', 'Unknown') or 'Unknown')} — {u['points']} pts" for rank, u in enumerate(all_users)]
     keyboard = build_menu(items, 0, 'lead')
     await update.message.reply_text(
         "<b>🏅 Leaderboard 🏅</b>\n\n" + "\n".join(items[0:ITEMS_PER_PAGE]),
@@ -299,8 +296,7 @@ async def leaderboard_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.warning("leaderboard_list is empty in context.user_data")
             await query.edit_message_text("Error: Leaderboard data not found. Please run /leaderboard again.")
             return
-        # Use get() to handle missing or None usernames
-        items = [f"{rank+1}. @{html.escape(u.get('username', 'Unknown'))} — {u['points']} pts" for rank, u in enumerate(all_users)]
+        items = [f"{rank+1}. @{html.escape(u.get('username', 'Unknown') or 'Unknown')} — {u['points']} pts" for rank, u in enumerate(all_users)]
         start = page * ITEMS_PER_PAGE
         end = start + ITEMS_PER_PAGE
         page_items = items[start:end]
@@ -332,7 +328,6 @@ async def viewusers_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     all_users = list(users.find())
     context.user_data['users_list'] = all_users
     logger.info(f"Stored users_list with {len(all_users)} users in user_data")
-    # Use get() to handle missing or None usernames
     items = [f"{u['_id']}: {u.get('username', 'No username')}" for u in all_users]
     keyboard = build_menu(items, 0, 'users')
     await update.message.reply_text("👥 Registered Users:", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -350,7 +345,6 @@ async def viewusers_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup([]))
         await query.message.reply_text("Error: Users data not found. Please run /viewusers again.")
         return
-    # Use get() to handle missing or None usernames
     items = [f"{u['_id']}: {u.get('username', 'No username')}" for u in all_users]
     keyboard = build_menu(items, page, 'users')
     for attempt in range(3):
