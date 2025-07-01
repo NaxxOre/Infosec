@@ -116,7 +116,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎗Leaderboard\n"
         "🎗If any error got try /cancel\n"
         "If you want to share CTF challenges or need help in solving one, you can create a challenge for everyone to think about and try to solve.\n"
-        "Feel free to say something in the InfoSec CTF Training Group to request if you really want to share challenges.\n"
+        "Feel free to said something in the InfoSec CTF Training Group to request if you really want to share challenges.\n"
         "Commands for managing challenges\n"
         "You can typically type just / for the bot to show you the commands.\n"
         "/help – View all the commands\n"
@@ -242,6 +242,8 @@ async def my_viewpoints(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Leaderboard with pagination (Optimized)
 async def leaderboard_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+
     loop = asyncio.get_event_loop()
 
     # Get first scored times for all users in a single query
