@@ -141,7 +141,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/myviewpoints – View your points\n"
         "/viewchallenges – List all challenges\n"
         "/leaderboard – View top users\n"
-        "/bloods – View solvers for challenges by category\n"
+        "/bloods – View all challenges and their solvers\n"
         "/cancel – Fix command not working errors"
     )
     await update.message.reply_text(text)
@@ -152,7 +152,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/myviewpoints – View your points\n"
         "/viewchallenges – List all challenges\n"
         "/leaderboard – View top users\n"
-        "/bloods – View solvers for challenges by category\n"
+        "/bloods – View all challenges and their solvers\n"
         "/addflag – (Admin) Add/update a challenge\n"
         "/addnewadmins <username> – (Admin) Grant admin rights\n"
         "/delete <challenge> – (Admin) Delete a challenge\n"
@@ -164,7 +164,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # View challenges → categories -> challenges -> details
 async def view_challenges(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton(cat, callback_data=f"viewcat:{cat}")] for cat in CATEGORIES]
-    await update.message.reply_text("📂 Select a category:", Himalayas=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text("📂 Select a category:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def view_category_challenges(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -311,7 +311,7 @@ async def leaderboard_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
                 logger.info(f"Successfully updated leaderboard to page {page}")
-                return ACHIEVED
+                break
             except TimedOut:
                 logger.warning(f"edit_message_text timed out, retry {attempt+1}/3")
                 await asyncio.sleep(2)
@@ -498,25 +498,66 @@ async def submissions_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # New /bloods command handlers
 async def bloods_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [[InlineKeyboardButton(cat, callback_data=f"bloods_cat:{cat}")] for cat in CATEGORIES]
-    await update.message.reply_text("📂 Select a category to view solvers:", reply_markup=InlineKeyboardMarkup(keyboard))
+    pipeline = [
+        {"$lookup": {
+            "from": "submissions",
+            "let": {"chal": "$_id"},
+            "pipeline": [
+                {"$match": {
+                    "$expr": {"$and": [
+                        {"$eq": ["$challenge", "$$chal"]},
+                        {"$eq": ["$correct", True]}
+                    ]}
+                }},
+                {"$group": {"_id": None, "solvers": {"$addToSet": "$user_id"}}},
+                {"$project": {"_id": 0, "solver_count": {"$size": "$solvers"}}}
+            ],
+            "as": "solver_info"
+        }},
+        {"$addFields": {
+            "solver_count": {"$ifNull": [{"$arrayElemAt": ["$solver_info.solver_count", 0]}, 0]}
+        }},
+        {"$project": {"_id": 1, "solver_count": 1}}
+    ]
+    all_challenges = list(flags.aggregate(pipeline))
+    all_challenges.sort(key=lambda x: x['_id'].lower())  # Sort alphabetically, case-insensitive
+    context.user_data['bloods_challenges'] = all_challenges
+    await show_challenges_page(update, context, 0)
 
-async def bloods_select_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    category = query.data.split(":", 1)[1]
-    challenges = [c["_id"] for c in flags.find({"category": category})]
-    if not challenges:
-        await query.edit_message_text(f"No challenges in category {category}.")
+async def show_challenges_page(update: Update, context: ContextTypes.DEFAULT_TYPE, page: int):
+    all_challenges = context.user_data.get('bloods_challenges', [])
+    if not all_challenges:
+        if update.callback_query:
+            await update.callback_query.edit_message_text("No challenges available.")
+        else:
+            await update.message.reply_text("No challenges available.")
         return
-    keyboard = [[InlineKeyboardButton(ch, callback_data=f"bloods_chal:{ch}")] for ch in challenges]
-    await query.edit_message_text(f"📋 Select a challenge in {category} to view solvers:", reply_markup=InlineKeyboardMarkup(keyboard))
+    start = page * ITEMS_PER_PAGE
+    end = start + ITEMS_PER_PAGE
+    page_challenges = all_challenges[start:end]
+    keyboard = []
+    for chal in page_challenges:
+        name = chal['_id']
+        count = chal['solver_count']
+        button_text = f"{name} ({count} solvers)"
+        keyboard.append([InlineKeyboardButton(button_text, callback_data=f"bloods_show:{name}")])
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"bloods_page:{page-1}"))
+    if end < len(all_challenges):
+        nav_buttons.append(InlineKeyboardButton("Next ➡️", callback_data=f"bloods_page:{page+1}"))
+    if nav_buttons:
+        keyboard.append(nav_buttons)
+    text = "📋 All Challenges:"
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def bloods_show_solvers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    challenge = query.data.split(":", 1)[1]
-    # Find correct submissions for this challenge, sorted by timestamp
+    _, challenge = query.data.split(':', 1)
     solved_submissions = list(submissions.find({"challenge": challenge, "correct": True}).sort("timestamp", 1))
     if not solved_submissions:
         await query.edit_message_text(f"No solvers yet for {challenge}.")
@@ -526,7 +567,6 @@ async def bloods_show_solvers(update: Update, context: ContextTypes.DEFAULT_TYPE
         user_doc = users.find_one({"_id": sub["user_id"]})
         username = user_doc.get("username", "Unknown") if user_doc else "Unknown"
         solvers.append(username)
-    # Remove duplicates, preserving order
     seen = set()
     unique_solvers = [s for s in solvers if not (s in seen or seen.add(s))]
     if not unique_solvers:
@@ -534,11 +574,18 @@ async def bloods_show_solvers(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     firstblood = unique_solvers[0]
     other_solvers = unique_solvers[1:]
-    text = "Solvers\n"
+    text = f"Solvers for {challenge}\n"
     text += f"@{html.escape(firstblood)} firstblood\n"
     for solver in other_solvers:
         text += f"@{html.escape(solver)}\n"
     await query.edit_message_text(text)
+
+async def bloods_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    _, page_str = query.data.split(':', 1)
+    page = int(page_str)
+    await show_challenges_page(update, context, page)
 
 # Startup: retry setting commands
 def init_commands(app):
@@ -550,7 +597,7 @@ def init_commands(app):
             BotCommand("myviewpoints", "View your points"),
             BotCommand("viewchallenges", "List all challenges"),
             BotCommand("leaderboard", "View top users"),
-            BotCommand("bloods", "View solvers for challenges by category"),
+            BotCommand("bloods", "View all challenges and their solvers"),
             BotCommand("addflag", "Add/update a challenge"),
             BotCommand("addnewadmins", "Grant admin rights"),
             BotCommand("delete", "Delete a challenge"),
@@ -587,8 +634,8 @@ def main():
     app.add_handler(CommandHandler("leaderboard", leaderboard_start))
     app.add_handler(CallbackQueryHandler(leaderboard_page, pattern=r"^lead:\d+:nav$"))
     app.add_handler(CommandHandler("bloods", bloods_start))
-    app.add_handler(CallbackQueryHandler(bloods_select_category, pattern=r"^bloods_cat:.+"))
-    app.add_handler(CallbackQueryHandler(bloods_show_solvers, pattern=r"^bloods_chal:.+"))
+    app.add_handler(CallbackQueryHandler(bloods_show_solvers, pattern=r"^bloods_show:.+"))
+    app.add_handler(CallbackQueryHandler(bloods_page, pattern=r"^bloods_page:\d+$"))
     app.add_handler(CommandHandler("addnewadmins", addnewadmins))
     app.add_handler(CommandHandler("delete", delete_challenge))
     app.add_handler(CommandHandler("viewusers", viewusers_start))
