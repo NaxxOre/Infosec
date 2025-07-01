@@ -202,7 +202,7 @@ async def select_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def receive_flag(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     chal = context.user_data.get("challenge")
-    flag_text = update.message.text.strip()
+    flag_text**.text.strip()
     doc = flags.find_one({"_id": chal})
     if not doc:
         await update.message.reply_text("❗ Challenge not found.")
@@ -250,11 +250,11 @@ async def my_viewpoints(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Leaderboard with pagination (Fixed)
 async def leaderboard_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     all_users = list(users.find())
-    # Sort by points descending, then by last_correct_submission ascending
+    # Sort by points descending, then by last_correct_submission ascending, then by username
     all_users.sort(key=lambda u: (
         -u.get("points", 0),
         u.get("last_correct_submission", datetime(9999, 12, 31)) if u.get("last_correct_submission") else datetime(9999, 12, 31),
-        u.get("username", "")
+        u.get("username") or "Unknown"
     ))
     if not all_users:
         await update.message.reply_text("No users on the leaderboard yet.")
