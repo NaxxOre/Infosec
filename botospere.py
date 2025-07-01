@@ -68,7 +68,7 @@ def is_admin(username: str) -> bool:
 async def add_user_if_not_exists(user_id: int, username: str):
     users.update_one(
         {"_id": user_id},
-        {"$setOnInsert": {"username": username, "points": 0}},
+        {"$setOnInsert": {"username": username, "points": 0, "last_solved_at": None}},
         upsert=True,
     )
 
@@ -94,7 +94,7 @@ def build_menu(items, page, prefix):
     page_items = items[start:end]
     keyboard = []
     for item in page_items:
-        keyboard.append([InlineKeyboardButton(item, callback_data=f"{prefix}:noop")])
+        keyboard.append([InlineKeyboardButton(item, callback_data=f"{prefix}:{page}:{item}")])
     nav_buttons = []
     if page > 0:
         nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"{prefix}:{page-1}:nav"))
@@ -170,7 +170,7 @@ async def details_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pts = doc.get("points", 0)
     level = doc.get("level", "Unknown")
     link = doc.get("post_link", "")
-    text = f"*{escape_markdown(name)}*\nCategory: {category}\nPoints: {pts}\nLevel: {level}\n[Post Link]({link})"
+    text = f"*{name}*\nCategory: {category}\nPoints: {pts}\nLevel: {level}\n[Post Link]({link})"
     await query.edit_message_text(text, parse_mode="Markdown")
 
 # Submission flow
@@ -194,7 +194,7 @@ async def select_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chal = query.data.split(":", 1)[1]
     context.user_data["challenge"] = chal
     await query.edit_message_text(
-        f"🚩 Submit flag for *{escape_markdown(chal)}*:\n_Please send only the flag._",
+        f"🚩 Submit flag for *{chal}*:\n_Please send only the flag._",
         parse_mode="Markdown",
     )
     return SUBMIT_WAIT_FLAG
@@ -202,7 +202,7 @@ async def select_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def receive_flag(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     chal = context.user_data.get("challenge")
-    flag_text**.text.strip()
+    flag_text = update.message.text.strip()
     doc = flags.find_one({"_id": chal})
     if not doc:
         await update.message.reply_text("❗ Challenge not found.")
@@ -217,14 +217,13 @@ async def receive_flag(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "timestamp": datetime.utcnow(),
     })
     if correct:
-        users.update_one(
-            {"_id": user.id},
-            {
-                "$inc": {"points": pts},
-                "$set": {"last_correct_submission": datetime.utcnow()}
-            },
-            upsert=True
-        )
+        current_user = users.find_one({"_id": user.id})
+        current_points = current_user.get("points", 0) if current_user else 0
+        new_points = current_points + pts
+        update_data = {"$inc": {"points": pts}, "$set": {"last_solved_at": datetime.utcnow()}}
+        if current_points == 0:
+            update_data["$set"]["last_solved_at"] = datetime.utcnow()
+        users.update_one({"_id": user.id}, update_data)
         await update.message.reply_text(
             f"✅ Correct! You earned {pts} points for {chal}!"
         )
@@ -245,44 +244,54 @@ async def my_viewpoints(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     doc = users.find_one({"_id": user.id}) or {}
     pts = doc.get("points", 0)
-    await update.message.reply_text(f"👤 @{escape_markdown(user.username)}, you have {pts} points.")
+    await update.message.reply_text(f"👤 @{user.username}, you have {pts} points.")
 
-# Leaderboard with pagination (Fixed)
+# Leaderboard with pagination
 async def leaderboard_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    all_users = list(users.find())
-    # Sort by points descending, then by last_correct_submission ascending, then by username
-    all_users.sort(key=lambda u: (
-        -u.get("points", 0),
-        u.get("last_correct_submission", datetime(9999, 12, 31)) if u.get("last_correct_submission") else datetime(9999, 12, 31),
-        u.get("username") or "Unknown"
-    ))
+    all_users = list(users.find().sort([("points", -1), ("last_solved_at", 1)]))
     if not all_users:
         await update.message.reply_text("No users on the leaderboard yet.")
         return
-    items = [f"{rank + 1}. @{escape_markdown(u.get('username', 'Unknown'))} — {u.get('points', 0)} pts" for rank, u in enumerate(all_users)]
+    items = [f"{rank + 1}. @{escape_markdown(u.get('username', 'Unknown'))} — {u['points']} pts" for rank, u in enumerate(all_users)]
     context.user_data['leaderboard_items'] = items
-    start = 0
-    end = ITEMS_PER_PAGE
-    text = "🏅 *Leaderboard* 🏅\n\n" + "\n".join(items[start:end])
-    keyboard = build_menu(items, 0, 'lead')
-    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    await send_leaderboard_page(update.message, context, 0)
+
+async def send_leaderboard_page(message, context, page):
+    items = context.user_data.get('leaderboard_items', [])
+    if not items:
+        await message.reply_text("Leaderboard data is missing or expired.")
+        return
+    start = page * ITEMS_PER_PAGE
+    end = start + ITEMS_PER_PAGE
+    page_items = items[start:end]
+    text = "🏅 *Leaderboard* 🏅\n\n" + "\n".join(page_items)
+    keyboard = []
+    if page > 0:
+        keyboard.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"lead:{page-1}"))
+    if end < len(items):
+        keyboard.append(InlineKeyboardButton("Next ➡️", callback_data=f"lead:{page+1}"))
+    reply_markup = InlineKeyboardMarkup([keyboard]) if keyboard else None
+    await message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
 
 async def leaderboard_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    data = query.data.split(':')
-    if len(data) == 3 and data[2] == 'nav':
-        page = int(data[1])
-        items = context.user_data.get('leaderboard_items', [])
-        if not items:
-            await query.edit_message_text("Leaderboard data is missing or expired.")
-            return
-        start = page * ITEMS_PER_PAGE
-        end = start + ITEMS_PER_PAGE
-        page_items = items[start:end]
-        text = "🏅 *Leaderboard* 🏅\n\n" + "\n".join(page_items)
-        keyboard = build_menu(items, page, 'lead')
-        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    page = int(query.data.split(':')[1])
+    items = context.user_data.get('leaderboard_items', [])
+    if not items:
+        await query.edit_message_text("Leaderboard list is empty or expired.")
+        return
+    start = page * ITEMS_PER_PAGE
+    end = start + ITEMS_PER_PAGE
+    page_items = items[start:end]
+    text = "🏅 *Leaderboard* 🏅\n\n" + "\n".join(page_items)
+    keyboard = []
+    if page > 0:
+        keyboard.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"lead:{page-1}"))
+    if end < len(items):
+        keyboard.append(InlineKeyboardButton("Next ➡️", callback_data=f"lead:{page+1}"))
+    reply_markup = InlineKeyboardMarkup([keyboard]) if keyboard else None
+    await query.edit_message_text(text, parse_mode="Markdown", reply_markup=reply_markup)
 
 # Registered users with pagination
 async def viewusers_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -299,13 +308,12 @@ async def viewusers_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def viewusers_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    data = query.data.split(':')
-    if len(data) == 3 and data[2] == 'nav':
-        page = int(data[1])
-        all_users = context.user_data.get('users_list', [])
-        items = [f"{u['_id']}: @{escape_markdown(u.get('username', 'Unknown'))}" for u in all_users]
-        keyboard = build_menu(items, page, 'users')
-        await query.edit_message_reply_markup(text="👥 Registered Users:", reply_markup=InlineKeyboardMarkup(keyboard))
+    _, page_str, _ = query.data.split(':', 2)
+    page = int(page_str)
+    all_users = context.user_data.get('users_list', [])
+    items = [f"{u['_id']}: @{escape_markdown(u.get('username', 'Unknown'))}" for u in all_users]
+    keyboard = build_menu(items, page, 'users')
+    await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
 
 # Admin commands (addnewadmins, addflag, delete, viewsubmissions)
 async def addnewadmins(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -425,6 +433,13 @@ async def viewsubmissions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         items.append(f"{ts} - @{escape_markdown(uname)} - {r['challenge']} - {r['submitted_flag']} - {status}")
     context.user_data['submissions_items'] = items
     context.user_data['submissions_page'] = page
+    await send_submissions_page(update.message, context, page)
+
+async def send_submissions_page(message, context, page):
+    items = context.user_data.get('submissions_items', [])
+    if not items:
+        await message.reply_text("Submissions data is missing or expired.")
+        return
     text = "📝 Submissions:\n\n" + "\n".join(items)
     keyboard = []
     if page > 0:
@@ -433,7 +448,7 @@ async def viewsubmissions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if (page + 1) * ITEMS_PER_PAGE < total_submissions:
         keyboard.append(InlineKeyboardButton("Next ➡️", callback_data=f"subs:{page+1}"))
     reply_markup = InlineKeyboardMarkup([keyboard]) if keyboard else None
-    await update.message.reply_text(text, reply_markup=reply_markup)
+    await message.reply_text(text, reply_markup=reply_markup)
 
 async def submissions_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -506,11 +521,11 @@ def main():
     app.add_handler(CallbackQueryHandler(view_category_challenges, pattern=r"^viewcat:.+"))
     app.add_handler(CallbackQueryHandler(details_challenge, pattern=r"^detail:.+"))
     app.add_handler(CommandHandler("leaderboard", leaderboard_start))
-    app.add_handler(CallbackQueryHandler(leaderboard_page, pattern=r"^lead:\d+:nav$"))
+    app.add_handler(CallbackQueryHandler(leaderboard_page, pattern=r"^lead:\d+$"))
     app.add_handler(CommandHandler("addnewadmins", addnewadmins))
     app.add_handler(CommandHandler("delete", delete_challenge))
     app.add_handler(CommandHandler("viewusers", viewusers_start))
-    app.add_handler(CallbackQueryHandler(viewusers_page, pattern=r"^users:\d+:nav$"))
+    app.add_handler(CallbackQuery = CallbackQueryHandler(viewusers_page, pattern=r"^users:\d+:(nav|.+)"))
     app.add_handler(CommandHandler("viewsubmissions", viewsubmissions))
     app.add_handler(CallbackQueryHandler(submissions_page, pattern=r"^subs:\d+$"))
 
