@@ -116,7 +116,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎗Leaderboard\n"
         "🎗If any error got try /cancel\n"
         "If you want to share CTF challenges or need help in solving one, you can create a challenge for everyone to think about and try to solve.\n"
-        "Feel free to say something in the InfoSec CTF Training Group to request if you really want to share challenges.\n"
+        "Feel free to said something in the InfoSec CTF Training Group to request if you really want to share challenges.\n"
         "Commands for managing challenges\n"
         "You can typically type just / for the bot to show you the commands.\n"
         "/help – View all the commands\n"
@@ -170,7 +170,7 @@ async def details_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pts = doc.get("points", 0)
     level = doc.get("level", "Unknown")
     link = doc.get("post_link", "")
-    text = f"*{name}*\nCategory: {category}\nPoints: {pts}\nLevel: {level}\n[Post Link]({link})"
+    text = f"*{escape_markdown(name)}*\nCategory: {category}\nPoints: {pts}\nLevel: {level}\n[Post Link]({link})"
     await query.edit_message_text(text, parse_mode="Markdown")
 
 # Submission flow
@@ -194,7 +194,7 @@ async def select_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chal = query.data.split(":", 1)[1]
     context.user_data["challenge"] = chal
     await query.edit_message_text(
-        f"🚩 Submit flag for *{chal}*:\n_Please send only the flag._",
+        f"🚩 Submit flag for *{escape_markdown(chal)}*:\n_Please send only the flag._",
         parse_mode="Markdown",
     )
     return SUBMIT_WAIT_FLAG
@@ -217,7 +217,13 @@ async def receive_flag(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "timestamp": datetime.utcnow(),
     })
     if correct:
-        users.update_one({"_id": user.id}, {"$inc": {"points": pts}})
+        users.update_one(
+            {"_id": user.id},
+            {
+                "$inc": {"points": pts},
+                "$set": {"last_correct_submission": datetime.utcnow()}
+            }
+        )
         await update.message.reply_text(
             f"✅ Correct! You earned {pts} points for {chal}!"
         )
@@ -234,24 +240,17 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # Other view commands
-async def my_viewpoints(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def myversus(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     doc = users.find_one({"_id": user.id}) or {}
     pts = doc.get("points", 0)
-    await update.message.reply_text(f"👤 @{user.username}, you have {pts} points.")
+    await update.message.reply_text(f"👤 @{escape_markdown(user.username)}, you have {pts} points.")
 
-# Leaderboard with pagination
+# Leaderboard with pagination (Fixed)
 async def leaderboard_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     all_users = list(users.find())
-    # Calculate first_scored_at for each user based on their earliest correct submission
-    for u in all_users:
-        earliest_submission = submissions.find_one(
-            {"user_id": u["_id"], "correct": True},
-            sort=[("timestamp", 1)]
-        )
-        u["first_scored_at"] = earliest_submission["timestamp"] if earliest_submission else datetime.max
-    # Sort by points descending and first_scored_at ascending
-    all_users.sort(key=lambda u: (-u["points"], u["first_scored_at"]))
+    # Sort by points descending, then by last_correct_submission ascending (None treated as datetime.max)
+    all_users.sort(key=lambda u: (-u.get("points", 0), u.get("last_correct_submission", datetime.max) if u.get("last_correct_submission") is not None else datetime.max))
     if not all_users:
         await update.message.reply_text("No users on the leaderboard yet.")
         return
@@ -394,7 +393,7 @@ async def af_flag(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }},
         upsert=True,
     )
-    await update.message.reply_text(f"✅ Challenge '{name}' in category '{category}' with level '{level}' added/updated with {pts} points.")
+    await update.message.reply_text(f"✅ Challenge '{name}' in'яті '{category}' with level '{level}' added/updated with {pts} points.")
     return ConversationHandler.END
 
 async def delete_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
