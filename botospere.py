@@ -124,16 +124,16 @@ def build_submissions_message(submissions_list, page):
 # Command handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
-        "👋 Welcome to Csec CTF flag Bot 👾\n"
-        "🦾This bot is designed to Submit flags for CTF challenges from Csec Cyber_CTF learning Gp\n"
+        "👋 Welcome to InfoSec CTF flag Bot 👾\n"
+        "🦾This bot is designed to Submit flags for CTF challenges from InfoSec Cyber_CTF learning Gp\n"
         "🎟Features\n"
         "🎗 Flag submission\n"
         "🎗View Challenges\n"
         "🎗Earn points\n"
         "🎗Leaderboard\n"
         "If you want to share CTF challenges or need help in solving one, you can create a challenge for everyone to think about and try to solve.\n"
-        "Feel free to say something in the Csec Cyber_CTF Training Group to request if you really want to share challenges.\n"
-        "https://t.me/+fFDeRvQtILU5MzZl\n"
+        "Feel free to say something in the InfoSec Cyber_CTF Training Group to request if you really want to share challenges.\n"
+        
         "Commands for managing challenges\n"
         "You can typically type just / for the bot to show you the commands.\n"
         "/help – View all the commands\n"
@@ -141,7 +141,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/myviewpoints – View your points\n"
         "/viewchallenges – List all challenges\n"
         "/leaderboard – View top users\n"
-        "/cancel – Cancel current operation"
+        "/cancel – Fix command not working errors"
     )
     await update.message.reply_text(text)
 
@@ -156,7 +156,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/delete <challenge> – (Admin) Delete a challenge\n"
         "/viewusers – (Admin) View registered users\n"
         "/viewsubmissions – (Admin) View submissions log\n"
-        "/cancel – Cancel current operation"
+        "/cancel – Fix command not working errors"
     )
 
 # View challenges → categories -> challenges -> details
