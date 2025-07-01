@@ -94,7 +94,7 @@ def build_menu(items, page, prefix):
     page_items = items[start:end]
     keyboard = []
     for item in page_items:
-        keyboard.append([InlineKeyboardButton(item, callback_data=f"{prefix}:{page}:{item}")])
+        keyboard.append([InlineKeyboardButton(item, callback_data=f"{prefix}:noop")])
     nav_buttons = []
     if page > 0:
         nav_buttons.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"{prefix}:{page-1}:nav"))
@@ -116,7 +116,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎗Leaderboard\n"
         "🎗If any error got try /cancel\n"
         "If you want to share CTF challenges or need help in solving one, you can create a challenge for everyone to think about and try to solve.\n"
-        "Feel free to said something in the InfoSec CTF Training Group to request if you really want to share challenges.\n"
+        "Feel free to say something in the InfoSec CTF Training Group to request if you really want to share challenges.\n"
         "Commands for managing challenges\n"
         "You can typically type just / for the bot to show you the commands.\n"
         "/help – View all the commands\n"
@@ -240,7 +240,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # Other view commands
-async def myversus(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def my_viewpoints(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     doc = users.find_one({"_id": user.id}) or {}
     pts = doc.get("points", 0)
@@ -256,44 +256,28 @@ async def leaderboard_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     items = [f"{rank + 1}. @{escape_markdown(u.get('username', 'Unknown'))} — {u['points']} pts" for rank, u in enumerate(all_users)]
     context.user_data['leaderboard_items'] = items
-    await send_leaderboard_page(update.message, context, 0)
-
-async def send_leaderboard_page(message, context, page):
-    items = context.user_data.get('leaderboard_items', [])
-    if not items:
-        await message.reply_text("Leaderboard data is missing or expired.")
-        return
-    start = page * ITEMS_PER_PAGE
-    end = start + ITEMS_PER_PAGE
-    page_items = items[start:end]
-    text = "🏅 *Leaderboard* 🏅\n\n" + "\n".join(page_items)
-    keyboard = []
-    if page > 0:
-        keyboard.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"lead:{page-1}"))
-    if end < len(items):
-        keyboard.append(InlineKeyboardButton("Next ➡️", callback_data=f"lead:{page+1}"))
-    reply_markup = InlineKeyboardMarkup([keyboard]) if keyboard else None
-    await message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+    start = 0
+    end = ITEMS_PER_PAGE
+    text = "🏅 *Leaderboard* 🏅\n\n" + "\n".join(items[start:end])
+    keyboard = build_menu(items, 0, 'lead')
+    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def leaderboard_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    page = int(query.data.split(':')[1])
-    items = context.user_data.get('leaderboard_items', [])
-    if not items:
-        await query.edit_message_text("Leaderboard list is empty or expired.")
-        return
-    start = page * ITEMS_PER_PAGE
-    end = start + ITEMS_PER_PAGE
-    page_items = items[start:end]
-    text = "🏅 *Leaderboard* 🏅\n\n" + "\n".join(page_items)
-    keyboard = []
-    if page > 0:
-        keyboard.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"lead:{page-1}"))
-    if end < len(items):
-        keyboard.append(InlineKeyboardButton("Next ➡️", callback_data=f"lead:{page+1}"))
-    reply_markup = InlineKeyboardMarkup([keyboard]) if keyboard else None
-    await query.edit_message_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+    data = query.data.split(':')
+    if len(data) == 3 and data[2] == 'nav':
+        page = int(data[1])
+        items = context.user_data.get('leaderboard_items', [])
+        if not items:
+            await query.edit_message_text("Leaderboard data is missing or expired.")
+            return
+        start = page * ITEMS_PER_PAGE
+        end = start + ITEMS_PER_PAGE
+        page_items = items[start:end]
+        text = "🏅 *Leaderboard* 🏅\n\n" + "\n".join(page_items)
+        keyboard = build_menu(items, page, 'lead')
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
 # Registered users with pagination
 async def viewusers_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -310,12 +294,13 @@ async def viewusers_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def viewusers_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    _, page_str, _ = query.data.split(':', 2)
-    page = int(page_str)
-    all_users = context.user_data.get('users_list', [])
-    items = [f"{u['_id']}: @{escape_markdown(u.get('username', 'Unknown'))}" for u in all_users]
-    keyboard = build_menu(items, page, 'users')
-    await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
+    data = query.data.split(':')
+    if len(data) == 3 and data[2] == 'nav':
+        page = int(data[1])
+        all_users = context.user_data.get('users_list', [])
+        items = [f"{u['_id']}: @{escape_markdown(u.get('username', 'Unknown'))}" for u in all_users]
+        keyboard = build_menu(items, page, 'users')
+        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
 
 # Admin commands (addnewadmins, addflag, delete, viewsubmissions)
 async def addnewadmins(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -393,7 +378,7 @@ async def af_flag(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }},
         upsert=True,
     )
-    await update.message.reply_text(f"✅ Challenge '{name}' in'яті '{category}' with level '{level}' added/updated with {pts} points.")
+    await update.message.reply_text(f"✅ Challenge '{name}' in category '{category}' with level '{level}' added/updated with {pts} points.")
     return ConversationHandler.END
 
 async def delete_challenge(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -435,13 +420,6 @@ async def viewsubmissions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         items.append(f"{ts} - @{escape_markdown(uname)} - {r['challenge']} - {r['submitted_flag']} - {status}")
     context.user_data['submissions_items'] = items
     context.user_data['submissions_page'] = page
-    await send_submissions_page(update.message, context, page)
-
-async def send_submissions_page(message, context, page):
-    items = context.user_data.get('submissions_items', [])
-    if not items:
-        await message.reply_text("Submissions data is missing or expired.")
-        return
     text = "📝 Submissions:\n\n" + "\n".join(items)
     keyboard = []
     if page > 0:
@@ -450,7 +428,7 @@ async def send_submissions_page(message, context, page):
     if (page + 1) * ITEMS_PER_PAGE < total_submissions:
         keyboard.append(InlineKeyboardButton("Next ➡️", callback_data=f"subs:{page+1}"))
     reply_markup = InlineKeyboardMarkup([keyboard]) if keyboard else None
-    await message.reply_text(text, reply_markup=reply_markup)
+    await update.message.reply_text(text, reply_markup=reply_markup)
 
 async def submissions_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -523,11 +501,11 @@ def main():
     app.add_handler(CallbackQueryHandler(view_category_challenges, pattern=r"^viewcat:.+"))
     app.add_handler(CallbackQueryHandler(details_challenge, pattern=r"^detail:.+"))
     app.add_handler(CommandHandler("leaderboard", leaderboard_start))
-    app.add_handler(CallbackQueryHandler(leaderboard_page, pattern=r"^lead:\d+$"))
+    app.add_handler(CallbackQueryHandler(leaderboard_page, pattern=r"^lead:\d+:nav$"))
     app.add_handler(CommandHandler("addnewadmins", addnewadmins))
     app.add_handler(CommandHandler("delete", delete_challenge))
     app.add_handler(CommandHandler("viewusers", viewusers_start))
-    app.add_handler(CallbackQueryHandler(viewusers_page, pattern=r"^users:\d+:(nav|.+)"))
+    app.add_handler(CallbackQueryHandler(viewusers_page, pattern=r"^users:\d+:nav$"))
     app.add_handler(CommandHandler("viewsubmissions", viewsubmissions))
     app.add_handler(CallbackQueryHandler(submissions_page, pattern=r"^subs:\d+$"))
 
