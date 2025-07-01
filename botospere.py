@@ -16,7 +16,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
 )
-from telegram.error import TimedOut
+from telegram.error import TimedOut, BadRequest
 
 # Optional dotenv support
 try:
@@ -311,15 +311,25 @@ async def leaderboard_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=InlineKeyboardMarkup(keyboard)
                 )
                 logger.info(f"Successfully updated leaderboard to page {page}")
-                break
+                return
             except TimedOut:
                 logger.warning(f"edit_message_text timed out, retry {attempt+1}/3")
-                await asyncio.sleep(2)
+                await asyncio.sleep(5)  # Increased delay to 5 seconds
+            except BadRequest as e:
+                if "Message is not modified" in str(e):
+                    logger.info("Message content is the same, no need to edit.")
+                    return
+                elif "Message to edit not found" in str(e) or "MESSAGE_ID_INVALID" in str(e):
+                    logger.error("Cannot edit message: message not found or invalid.")
+                    await query.message.reply_text("Error: The leaderboard message is no longer available. Please run /leaderboard again.")
+                    return
+                else:
+                    logger.error(f"BadRequest error: {e}")
             except Exception as e:
-                logger.error(f"Error editing leaderboard message: {e}")
+                logger.error(f"Unexpected error editing leaderboard message: {e}")
                 break
         logger.error("Failed to edit leaderboard message after 3 attempts")
-        await query.edit_message_text("Error: Could not update leaderboard. Please try again.")
+        await query.message.reply_text("Error: Could not update leaderboard. Please try again later.")
 
 # Registered users with pagination
 async def viewusers_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
