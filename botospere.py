@@ -116,7 +116,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎗Leaderboard\n"
         "🎗If any error got try /cancel\n"
         "If you want to share CTF challenges or need help in solving one, you can create a challenge for everyone to think about and try to solve.\n"
-        "Feel free to said something in the InfoSec CTF Training Group to request if you really want to share challenges.\n"
+        "Feel free to say something in the InfoSec CTF Training Group to request if you really want to share challenges.\n"
         "Commands for managing challenges\n"
         "You can typically type just / for the bot to show you the commands.\n"
         "/help – View all the commands\n"
@@ -132,7 +132,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "/submit – Start flag submission\n"
         "/myviewpoints – View your points\n"
-        "/ SIDEBARchallenges – List all challenges\n"
+        "/viewchallenges – List all challenges\n"
         "/leaderboard – View top users\n"
         "/addflag – (Admin) Add/update a challenge\n"
         "/addnewadmins <username> – (Admin) Grant admin rights\n"
@@ -240,33 +240,21 @@ async def my_viewpoints(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pts = doc.get("points", 0)
     await update.message.reply_text(f"👤 @{user.username}, you have {pts} points.")
 
-# Leaderboard with pagination (Optimized)
+# Leaderboard with pagination
 async def leaderboard_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-
-    loop = asyncio.get_event_loop()
-
-    # Get first scored times for all users in a single query
-    first_scored_list = await loop.run_in_executor(None, lambda: list(submissions.aggregate([
-        {"$match": {"correct": True}},
-        {"$group": {"_id": "$user_id", "first_scored_at": {"$min": "$timestamp"}}}
-    ])))
-    first_scored_dict = {item["_id"]: item["first_scored_at"] for item in first_scored_list}
-
-    # Get all users in a single query
-    all_users = await loop.run_in_executor(None, lambda: list(users.find()))
-
-    # Add first_scored_at to each user
+    all_users = list(users.find())
+    # Calculate first_scored_at for each user based on their earliest correct submission
     for u in all_users:
-        u["first_scored_at"] = first_scored_dict.get(u["_id"], datetime.max)
-
+        earliest_submission = submissions.find_one(
+            {"user_id": u["_id"], "correct": True},
+            sort=[("timestamp", 1)]
+        )
+        u["first_scored_at"] = earliest_submission["timestamp"] if earliest_submission else datetime.max
     # Sort by points descending and first_scored_at ascending
     all_users.sort(key=lambda u: (-u["points"], u["first_scored_at"]))
-
     if not all_users:
         await update.message.reply_text("No users on the leaderboard yet.")
         return
-
     items = [f"{rank + 1}. @{escape_markdown(u.get('username', 'Unknown'))} — {u['points']} pts" for rank, u in enumerate(all_users)]
     context.user_data['leaderboard_items'] = items
     await send_leaderboard_page(update.message, context, 0)
