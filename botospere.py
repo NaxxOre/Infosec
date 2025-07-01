@@ -222,7 +222,8 @@ async def receive_flag(update: Update, context: ContextTypes.DEFAULT_TYPE):
             {
                 "$inc": {"points": pts},
                 "$set": {"last_correct_submission": datetime.utcnow()}
-            }
+            },
+            upsert=True
         )
         await update.message.reply_text(
             f"✅ Correct! You earned {pts} points for {chal}!"
@@ -249,12 +250,16 @@ async def my_viewpoints(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Leaderboard with pagination (Fixed)
 async def leaderboard_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     all_users = list(users.find())
-    # Sort by points descending, then by last_correct_submission ascending (None treated as datetime.max)
-    all_users.sort(key=lambda u: (-u.get("points", 0), u.get("last_correct_submission", datetime.max) if u.get("last_correct_submission") is not None else datetime.max))
+    # Sort by points descending, then by last_correct_submission ascending
+    all_users.sort(key=lambda u: (
+        -u.get("points", 0),
+        u.get("last_correct_submission", datetime(9999, 12, 31)) if u.get("last_correct_submission") else datetime(9999, 12, 31),
+        u.get("username", "")
+    ))
     if not all_users:
         await update.message.reply_text("No users on the leaderboard yet.")
         return
-    items = [f"{rank + 1}. @{escape_markdown(u.get('username', 'Unknown'))} — {u['points']} pts" for rank, u in enumerate(all_users)]
+    items = [f"{rank + 1}. @{escape_markdown(u.get('username', 'Unknown'))} — {u.get('points', 0)} pts" for rank, u in enumerate(all_users)]
     context.user_data['leaderboard_items'] = items
     start = 0
     end = ITEMS_PER_PAGE
@@ -300,7 +305,7 @@ async def viewusers_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
         all_users = context.user_data.get('users_list', [])
         items = [f"{u['_id']}: @{escape_markdown(u.get('username', 'Unknown'))}" for u in all_users]
         keyboard = build_menu(items, page, 'users')
-        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.edit_message_reply_markup(text="👥 Registered Users:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 # Admin commands (addnewadmins, addflag, delete, viewsubmissions)
 async def addnewadmins(update: Update, context: ContextTypes.DEFAULT_TYPE):
